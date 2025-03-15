@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tärningskast Simulering</title>
+  <style>
+    /* Grundläggande reset och box-sizing */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      height: 100%;
+      font-family: Arial, sans-serif;
+      font-size: 1rem;
+    }
+    /* Wrapper för att centrera och hålla 16:9 */
+    .wrapper {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #f5f5f5;
+    }
+    .container {
+      width: 90%;
+      max-width: 1200px;
+      aspect-ratio: 16 / 9;
+      display: flex;
+      border: 1px solid #ccc;
+      background: #fff;
+      overflow: hidden;
+    }
+    /* Vänster del: Simulering med kontroller och tärningsvisning */
+    .simulation {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+      gap: 1rem;
+    }
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .dice-selection label {
+      margin-right: 1rem;
+      font-size: 1rem;
+    }
+    .buttons, .automation {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+      cursor: pointer;
+      border: none;
+      background-color: #007acc;
+      color: #fff;
+      border-radius: 0.3rem;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background-color: #005fa3;
+    }
+    input[type="number"] {
+      width: 6rem;
+      padding: 0.3rem;
+      font-size: 1rem;
+    }
+    /* Område för att visa tärningarna */
+    .dice-display {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .dice {
+      background: #fff;
+      border: 2px solid #000;
+      width: 4rem;
+      height: 4rem;
+      position: relative;
+    }
+    .dot {
+      background: #000;
+      width: 0.6rem;
+      height: 0.6rem;
+      border-radius: 50%;
+      position: absolute;
+    }
+    /* Positioner för prickarna */
+    .dot.center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .dot.top-left { top: 15%; left: 15%; }
+    .dot.top-right { top: 15%; right: 15%; }
+    .dot.bottom-left { bottom: 15%; left: 15%; }
+    .dot.bottom-right { bottom: 15%; right: 15%; }
+    .dot.middle-left { top: 50%; left: 15%; transform: translateY(-50%); }
+    .dot.middle-right { top: 50%; right: 15%; transform: translateY(-50%); }
+    
+    /* Höger del: Diagram */
+    .chart {
+      flex: 1;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-around;
+      padding: 1rem;
+      border-left: 1px solid #ccc;
+      position: relative;
+    }
+    .bar {
+      background: red;
+      width: 100%;
+      transition: height 0.2s;
+    }
+    /* Denna klass säkerställer att varje stapelbehållare får en bestämd höjd
+       samt att de placerade procentetiketterna positioneras korrekt */
+    .bar-container {
+      height: 80%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      position: relative;
+      flex: 1;
+    }
+    .bar-label {
+      position: absolute;
+      top: -1.5rem;
+      font-size: 1rem;
+    }
+    /* Säkerställ att inget horisontellt scroll behövs */
+    body {
+      overflow-x: hidden;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container" id="simContainer">
+      <!-- Simuleringens vänstra sida -->
+      <div class="simulation">
+        <div class="controls">
+          <!-- Välj antal tärningar -->
+          <div class="dice-selection">
+            <label><input type="radio" name="diceCount" value="1" checked> 1 tärning</label>
+            <label><input type="radio" name="diceCount" value="2"> 2 tärningar</label>
+            <label><input type="radio" name="diceCount" value="3"> 3 tärningar</label>
+          </div>
+          <!-- Knappar för att kasta, återställa och helskärm -->
+          <div class="buttons">
+            <button id="rollBtn">Kasta tärningar</button>
+            <button id="resetBtn">Starta om</button>
+            <button id="fullscreenBtn">Helskärm</button>
+          </div>
+          <!-- Automatisering: antal kast per sekund -->
+          <div class="automation">
+            <label for="throwsPerSecond">Kast per sekund:</label>
+            <input type="number" id="throwsPerSecond" value="1" min="1" max="100000">
+            <button id="autoRollBtn">Automatisera</button>
+          </div>
+        </div>
+        <!-- Här visas de kastade tärningarna -->
+        <div class="dice-display" id="diceDisplay"></div>
+      </div>
+      <!-- Diagrammets högra sida -->
+      <div class="chart" id="chart"></div>
+    </div>
+  </div>
+  
+  <script>
+    // Globala variabler
+    let diceCount = 1;
+    let totalRolls = 0;
+    let counts = {}; // Objekt med nycklar som summa och värde som antal träffar
+    let autoInterval = null;
+    
+    const rollBtn = document.getElementById("rollBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const autoRollBtn = document.getElementById("autoRollBtn");
+    const fullscreenBtn = document.getElementById("fullscreenBtn");
+    const diceDisplay = document.getElementById("diceDisplay");
+    const chart = document.getElementById("chart");
+    const throwsPerSecondInput = document.getElementById("throwsPerSecond");
+    const diceRadios = document.querySelectorAll('input[name="diceCount"]');
+    
+    // Initiera data för nuvarande antal tärningar
+    function initCounts() {
+      counts = {};
+      const minSum = diceCount;
+      const maxSum = diceCount * 6;
+      for(let sum = minSum; sum <= maxSum; sum++){
+        counts[sum] = 0;
+      }
+      totalRolls = 0;
+      updateChart();
+    }
+    
+    // Funktion för att skapa ett tärningselement med rätt prickar
+    function createDice(value) {
+      const diceEl = document.createElement("div");
+      diceEl.classList.add("dice");
+      
+      // Beroende på värde, lägg till prickar med rätt positioner
+      const addDot = (className) => {
+        const dot = document.createElement("div");
+        dot.classList.add("dot", className);
+        diceEl.appendChild(dot);
+      }
+      
+      switch(value) {
+        case 1:
+          addDot("center");
+          break;
+        case 2:
+          addDot("top-left");
+          addDot("bottom-right");
+          break;
+        case 3:
+          addDot("top-left");
+          addDot("center");
+          addDot("bottom-right");
+          break;
+        case 4:
+          addDot("top-left");
+          addDot("top-right");
+          addDot("bottom-left");
+          addDot("bottom-right");
+          break;
+        case 5:
+          addDot("top-left");
+          addDot("top-right");
+          addDot("center");
+          addDot("bottom-left");
+          addDot("bottom-right");
+          break;
+        case 6:
+          addDot("top-left");
+          addDot("top-right");
+          addDot("middle-left");
+          addDot("middle-right");
+          addDot("bottom-left");
+          addDot("bottom-right");
+          break;
+      }
+      return diceEl;
+    }
+    
+    // Utför ett kast
+    function rollDice() {
+      diceDisplay.innerHTML = ""; // rensa tidigare visade tärningar
+      let sum = 0;
+      for(let i = 0; i < diceCount; i++){
+        const roll = Math.floor(Math.random() * 6) + 1;
+        sum += roll;
+        const diceEl = createDice(roll);
+        diceDisplay.appendChild(diceEl);
+      }
+      totalRolls++;
+      if(counts.hasOwnProperty(sum)){
+        counts[sum]++;
+      }
+      updateChart();
+    }
+    
+    // Uppdatera diagrammet
+    function updateChart() {
+      chart.innerHTML = "";
+      const minSum = diceCount;
+      const maxSum = diceCount * 6;
+      // Räkna ut andel per summa i procent
+      for(let sum = minSum; sum <= maxSum; sum++){
+        const count = counts[sum];
+        const percentage = totalRolls === 0 ? 0 : (count / totalRolls * 100).toFixed(1);
+        // Skapa stapelbehållare med klass för att få fast höjd
+        const barContainer = document.createElement("div");
+        barContainer.classList.add("bar-container");
+        
+        // Procentetiketten, positioneras ovanför stapeln
+        const label = document.createElement("div");
+        label.classList.add("bar-label");
+        label.textContent = percentage + "%";
+        // Skapa stapeln
+        const bar = document.createElement("div");
+        bar.classList.add("bar");
+        // Sätt höjden proportionellt – 100% motsvarar hela höjden i bar-container
+        bar.style.height = percentage + "%";
+        // Etikett med summan under stapeln
+        const sumLabel = document.createElement("div");
+        sumLabel.style.fontSize = "0.9rem";
+        sumLabel.style.marginTop = "0.3rem";
+        sumLabel.textContent = sum;
+        
+        barContainer.appendChild(label);
+        barContainer.appendChild(bar);
+        barContainer.appendChild(sumLabel);
+        chart.appendChild(barContainer);
+      }
+    }
+    
+    // Reset-funktion
+    function resetSimulation() {
+      if(autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+        autoRollBtn.textContent = "Automatisera";
+      }
+      diceDisplay.innerHTML = "";
+      initCounts();
+    }
+    
+    // Hantera ändring av antal tärningar
+    diceRadios.forEach(radio => {
+      radio.addEventListener("change", () => {
+        diceCount = parseInt(document.querySelector('input[name="diceCount"]:checked').value);
+        resetSimulation();
+      });
+    });
+    
+    // Eventlisteners
+    rollBtn.addEventListener("click", rollDice);
+    resetBtn.addEventListener("click", resetSimulation);
+    
+    // Automatisering: starta eller stoppa automationen
+    autoRollBtn.addEventListener("click", () => {
+      if(autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+        autoRollBtn.textContent = "Automatisera";
+      } else {
+        const throwsPerSec = Math.min(parseInt(throwsPerSecondInput.value) || 1, 100000);
+        const intervalTime = 1000 / throwsPerSec;
+        autoRollBtn.textContent = "Stoppa automation";
+        autoInterval = setInterval(() => {
+          rollDice();
+          // Om antalet kast överstiger 100000, stoppa automationen
+          if(totalRolls >= 100000) {
+            clearInterval(autoInterval);
+            autoInterval = null;
+            autoRollBtn.textContent = "Automatisera";
+          }
+        }, intervalTime);
+      }
+    });
+    
+    // Fullskärmsläge
+    fullscreenBtn.addEventListener("click", () => {
+      const elem = document.getElementById("simContainer");
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) { /* Safari */
+        elem.webkitRequestFullscreen();
+      } else if (elem.msRequestFullscreen) { /* IE11 */
+        elem.msRequestFullscreen();
+      }
+    });
+    
+    // Initiera vid start
+    initCounts();
+  </script>
+</body>
+</html>
